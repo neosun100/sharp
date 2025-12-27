@@ -164,3 +164,7 @@ cython_debug/
 .DS_STORE
 *.pt
 .aider*
+
+
+# 公众号文章（不上传到 GitHub）
+公众号文章*.md
