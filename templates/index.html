@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHARP - 3D Gaussian Splat Generator</title>
+    <style>
+        :root { --bg: #0a0a0a; --card: #151515; --border: #2a2a2a; --text: #e0e0e0; --accent: #4a9eff; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header { text-align: center; padding: 20px 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+        h1 { font-size: 2em; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; }
+        .controls { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 15px; }
+        select, button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; }
+        .main-grid { display: grid; grid-template-columns: 350px 1fr; gap: 20px; min-height: 70vh; }
+        @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+        .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .panel h3 { margin-bottom: 15px; color: var(--accent); font-size: 15px; }
+        .upload-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 40px 15px; text-align: center; cursor: pointer; transition: all 0.3s; margin-bottom: 15px; }
+        .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: rgba(74,158,255,0.05); }
+        .upload-zone input { display: none; }
+        .upload-zone p { font-size: 13px; color: #888; }
+        .preview-img { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 10px; display: none; }
+        .btn { display: block; width: 100%; padding: 12px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 15px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        .progress-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 12px 0; display: none; }
+        .progress-bar .fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+        .status { text-align: center; color: #888; font-size: 13px; min-height: 20px; }
+        
+        .viewer-container { 
+            position: relative; 
+            background: #000; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            min-height: 500px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+        }
+        #result-video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: none;
+            border-radius: 8px;
+        }
+        .viewer-placeholder { 
+            color: #555; 
+            text-align: center; 
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .viewer-placeholder p { margin: 10px 0; font-size: 13px; }
+        .viewer-placeholder .icon { font-size: 48px; margin-bottom: 10px; }
+        
+        .gpu-bar { display: flex; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); font-size: 12px; }
+        .gpu-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+        .gpu-dot.active { background: #4caf50; }
+        .download-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); display: none; }
+        .download-btns { display: flex; gap: 8px; }
+        .download-btns .btn { flex: 1; margin-top: 0; padding: 10px; font-size: 12px; }
+        .info-text { font-size: 11px; color: #666; margin-top: 8px; }
+        footer { text-align: center; padding: 20px; color: #555; font-size: 12px; margin-top: 20px; }
+        footer a { color: var(--accent); text-decoration: none; }
+        
+        .loader { 
+            width: 50px; 
+            height: 50px; 
+            border: 3px solid var(--border); 
+            border-top-color: var(--accent); 
+            border-radius: 50%; 
+            animation: spin 1s linear infinite; 
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .processing-info {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 SHARP</h1>
+            <p class="subtitle" data-i18n="subtitle">Sharp Monocular View Synthesis - Generate Interactive 3D from Single Image</p>
+        </header>
+        <div class="controls">
+            <select id="language" onchange="setLanguage(this.value)">
+                <option value="en">English</option>
+                <option value="zh-CN">简体中文</option>
+            </select>
+        </div>
+        <div class="main-grid">
+            <div class="left-panel">
+                <div class="panel">
+                    <h3>📤 <span data-i18n="upload">Upload Image</span></h3>
+                    <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                        <input type="file" id="fileInput" accept="image/*,.heic" onchange="handleFile(this.files[0])">
+                        <p data-i18n="upload_hint">Click or drag image here</p>
+                    </div>
+                    <img id="previewImage" class="preview-img">
+                    <button class="btn" id="processBtn" onclick="processImage()" disabled data-i18n="generate">Generate 3D Scene</button>
+                    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+                    <p class="status" id="statusText"></p>
+                    <div class="download-section" id="downloadSection">
+                        <div class="download-btns">
+                            <button class="btn btn-secondary" id="downloadVideo">🎬 Video</button>
+                            <button class="btn btn-secondary" id="downloadPly">📦 PLY</button>
+                        </div>
+                        <p class="info-text" data-i18n="ply_info">PLY: 3D Gaussian Splat file for viewers</p>
+                    </div>
+                </div>
+                <div class="panel" style="margin-top:15px">
+                    <h3>🎮 <span data-i18n="gpu">GPU Status</span></h3>
+                    <div class="gpu-bar">
+                        <div class="gpu-dot" id="gpuDot"></div>
+                        <span id="gpuText">Idle</span>
+                        <button class="btn-secondary" style="margin-left:auto;padding:5px 10px" onclick="offloadGPU()" data-i18n="release">Release</button>
+                    </div>
+                </div>
+            </div>
+            <div class="panel viewer-panel">
+                <h3>🌐 <span data-i18n="viewer">3D Preview</span></h3>
+                <div class="viewer-container" id="viewerContainer">
+                    <video id="result-video" loop muted playsinline></video>
+                    <div class="viewer-placeholder" id="viewerPlaceholder">
+                        <div class="icon">📷</div>
+                        <p data-i18n="viewer_hint">Upload an image to generate 3D scene</p>
+                        <p style="font-size:11px;color:#444">The result will play as a looping video</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer>
+            <p>SHARP - Apple Research | <a href="/docs">API Docs</a> | <a href="https://github.com/apple/ml-sharp" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+    <script>
+        const i18n = {
+            en: { 
+                subtitle: "Sharp Monocular View Synthesis - Generate Interactive 3D from Single Image", 
+                upload: "Upload Image", 
+                upload_hint: "Click or drag image here", 
+                generate: "Generate 3D Scene", 
+                viewer: "3D Preview", 
+                viewer_hint: "Upload an image to generate 3D scene", 
+                gpu: "GPU Status", 
+                release: "Release", 
+                ply_info: "PLY: 3D Gaussian Splat file for viewers", 
+                processing: "Processing... This may take 1-2 minutes",
+                rendering: "Rendering 3D trajectory video...",
+                completed: "Done! Video is playing above ↑"
+            },
+            "zh-CN": { 
+                subtitle: "单目视图合成 - 从单张图片生成交互式3D场景", 
+                upload: "上传图片", 
+                upload_hint: "点击或拖拽图片到此处", 
+                generate: "生成 3D 场景", 
+                viewer: "3D 预览", 
+                viewer_hint: "上传图片以生成3D场景", 
+                gpu: "GPU 状态", 
+                release: "释放", 
+                ply_info: "PLY: 3D高斯点云文件，可用于查看器", 
+                processing: "处理中... 大约需要1-2分钟",
+                rendering: "正在渲染3D轨迹视频...",
+                completed: "完成！视频正在上方播放 ↑"
+            }
+        };
+
+        let currentLang = localStorage.getItem('lang') || 'en';
+        let selectedFile = null;
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('lang', lang);
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (i18n[lang] && i18n[lang][key]) el.textContent = i18n[lang][key];
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setLanguage(currentLang);
+            document.getElementById('language').value = currentLang;
+            refreshGPU();
+            
+            const dz = document.getElementById('dropZone');
+            dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+            dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+            dz.addEventListener('drop', e => { 
+                e.preventDefault(); 
+                dz.classList.remove('dragover'); 
+                if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); 
+            });
+        });
+
+        function handleFile(file) {
+            if (!file) return;
+            selectedFile = file;
+            const reader = new FileReader();
+            reader.onload = e => {
+                const img = document.getElementById('previewImage');
+                img.src = e.target.result;
+                img.style.display = 'block';
+                document.getElementById('processBtn').disabled = false;
+                
+                // Reset viewer
+                document.getElementById('result-video').style.display = 'none';
+                document.getElementById('viewerPlaceholder').style.display = 'block';
+                document.getElementById('downloadSection').style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function processImage() {
+            if (!selectedFile) return;
+            
+            const btn = document.getElementById('processBtn');
+            const progress = document.getElementById('progressBar');
+            const fill = document.getElementById('progressFill');
+            const status = document.getElementById('statusText');
+            const placeholder = document.getElementById('viewerPlaceholder');
+            const video = document.getElementById('result-video');
+            
+            btn.disabled = true;
+            progress.style.display = 'block';
+            fill.style.width = '10%';
+            status.textContent = i18n[currentLang].processing;
+            document.getElementById('downloadSection').style.display = 'none';
+            
+            // Show loading in viewer
+            video.style.display = 'none';
+            placeholder.innerHTML = '<div class="loader"></div><p class="processing-info">' + i18n[currentLang].processing + '</p>';
+            placeholder.style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('render_video', 'true');
+
+            // Simulate progress
+            let progressVal = 10;
+            const progressInterval = setInterval(() => {
+                if (progressVal < 85) {
+                    progressVal += Math.random() * 5;
+                    fill.style.width = progressVal + '%';
+                    
+                    if (progressVal > 50) {
+                        placeholder.querySelector('.processing-info').textContent = i18n[currentLang].rendering;
+                    }
+                }
+            }, 2000);
+
+            try {
+                const response = await fetch('/api/predict', { method: 'POST', body: formData });
+                clearInterval(progressInterval);
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed');
+                }
+
+                fill.style.width = '95%';
+                const data = await response.json();
+                
+                // Setup video playback
+                if (data.video_url) {
+                    video.src = data.video_url;
+                    video.style.display = 'block';
+                    placeholder.style.display = 'none';
+                    video.play();
+                }
+                
+                // Setup downloads
+                document.getElementById('downloadPly').onclick = () => window.location.href = data.ply_url;
+                if (data.video_url) {
+                    document.getElementById('downloadVideo').onclick = () => window.location.href = data.video_url;
+                    document.getElementById('downloadVideo').style.display = 'block';
+                } else {
+                    document.getElementById('downloadVideo').style.display = 'none';
+                }
+                document.getElementById('downloadSection').style.display = 'block';
+
+                fill.style.width = '100%';
+                status.textContent = i18n[currentLang].completed;
+                refreshGPU();
+                
+            } catch (e) {
+                clearInterval(progressInterval);
+                status.textContent = 'Error: ' + e.message;
+                placeholder.innerHTML = '<div class="icon">❌</div><p>Error: ' + e.message + '</p>';
+                fill.style.width = '0%';
+            }
+            
+            btn.disabled = false;
+        }
+
+        async function refreshGPU() {
+            try {
+                const res = await fetch('/api/gpu/status');
+                const data = await res.json();
+                document.getElementById('gpuDot').classList.toggle('active', data.model_loaded);
+                document.getElementById('gpuText').textContent = data.model_loaded 
+                    ? `Loaded (${Math.round(data.gpu_memory_allocated_mb || 0)} MB)` 
+                    : 'Idle';
+            } catch (e) {}
+        }
+
+        async function offloadGPU() {
+            await fetch('/api/gpu/offload', { method: 'POST' });
+            refreshGPU();
+        }
+    </script>
+</body>
+</html>
